@@ -14,12 +14,12 @@ class Surface(object):
         """
         df = csv_import(currency, date)
         self.surface = df
-        self.deltas = np.array(df.columns)[np.newaxis,:].astype(str)
-        self.tenors = np.array(df.index)[:,np.newaxis].astype(str)
+        self.deltas = np.array(df.columns).astype(str)
+        self.tenors = np.array(df.index).astype(str)
         self.maturities = tenors_yearfracs(self.tenors)
         self.vols = np.array(df)/scale
 
-    def _put_deltas(self):
+    def put_deltas(self):
         """
         Returns the put delta, N(-d1), of each point on the volatility surface.
         The put delta is more natural than the call, because it orientates the
@@ -29,33 +29,30 @@ class Surface(object):
         deltas_to_puts = np.vectorize(delta_to_put)
 
         # Assign arguments
-        deltas = self._deltas[np.newaxis,:]
-        maturities = self._maturities
-        volatilities = np.array(self.surface)
+        deltas = self.deltas[np.newaxis,:]
+        maturities = self.maturities[:,np.newaxis]
+        vols = self.vols
 
         # Construct delta surface
-        put_deltas = deltas_to_puts(deltas, maturities, volatilities)
+        put_deltas = deltas_to_puts(deltas, maturities, vols)
 
         # Return as Pandas surface
-        return pd.DataFrame(put_deltas, index = self._tenors,
-                            columns = self._deltas)
+        return pd.DataFrame(put_deltas, index=self.tenors, columns=self.deltas)
 
-    def _strike_surface(self):
+    def strike_surface(self):
         """
         Returns the surface of strikes implied by the volatility surface.
         """
         # Assign everything needed for put_delta_to_strike function
-        forwards = self._forwards
-        put_deltas = np.array(self._put_deltas())
-        volatilities = np.array(self.surface)
-        maturities = self._maturities
+        put_deltas = np.array(self.put_deltas())
+        vols = self.vols
+        maturities = self.maturities
 
         # Construct surface
-        strike_surface = put_delta_to_strike(forwards, put_deltas, volatilities,
-                                             maturities)
+        strikes = put_delta_to_strike(put_deltas, vols, maturities)
+
         # Return as Pandas surface
-        return pd.DataFrame(strike_surface, index = self._tenors,
-                            columns = self._deltas)
+        return pd.DataFrame(strikes, index=self.tenors, columns=self.deltas)
 
     def _log_strike_surface(self):
         """

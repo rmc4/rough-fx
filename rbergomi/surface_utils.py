@@ -23,9 +23,9 @@ def tenors_yearfracs(tenors):
                   'M': 1./12,
                   'Y': 1.}
 
-    yearfracs = np.zeros(len(tenors[:,0]))
+    yearfracs = np.zeros(len(tenors))
     i = 0
-    for tenor in tenors[:,0]:
+    for tenor in tenors:
         key = tenor[-1]
         multiple = int(tenor[:-1])
         yearfracs[i] = multiple * tenor_dict[key]
