@@ -7,7 +7,8 @@ def csv_import(currency, date):
     Function for importing Bloomberg FX volatility data from a csv file for
     a given date. Currency should be passed as 'GBPUSD' and date as '2017-01-31'.
     """
-    df = pd.read_csv('data/'+ currency +'-'+ date +'.csv', header=None)
+    # tab delimiter used since coming from excel
+    df = pd.read_csv('data/'+ currency +'-'+ date +'.csv', header=None, sep='\s+')
     deltas = np.array(df.loc[0,1:])
     tenors = np.array(df.loc[1:,0])
     vols = np.array(df.loc[1:,1:]).astype(float)
