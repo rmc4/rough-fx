@@ -13,7 +13,7 @@ class Surface(object):
         Constructor for surface instance.
         """
         df = csv_import(currency, date)
-        self.surface = df
+        self.surface = df/scale
         self.deltas = np.array(df.columns).astype(str)
         self.tenors = np.array(df.index).astype(str)
         self.maturities = tenors_yearfracs(self.tenors)
@@ -39,14 +39,14 @@ class Surface(object):
         # Return as Pandas surface
         return pd.DataFrame(put_deltas, index=self.tenors, columns=self.deltas)
 
-    def strike_surface(self):
+    def strikes(self):
         """
         Returns the surface of strikes implied by the volatility surface.
         """
         # Assign everything needed for put_delta_to_strike function
         put_deltas = np.array(self.put_deltas())
         vols = self.vols
-        maturities = self.maturities
+        maturities = self.maturities[:,np.newaxis]
 
         # Construct surface
         strikes = put_delta_to_strike(put_deltas, vols, maturities)
@@ -54,51 +54,48 @@ class Surface(object):
         # Return as Pandas surface
         return pd.DataFrame(strikes, index=self.tenors, columns=self.deltas)
 
-    def _log_strike_surface(self):
+    def logstrikes(self):
         """
         Transforms a strike surface into log-strikes, for given forwards.
         """
         # Assign everything needed for strike_to_log_strike function
-        forwards = self._forwards
-        strikes = np.array(self._strike_surface())
+        strikes = np.array(self.strikes())
 
-        log_strike_surface = strike_to_log_strike(forwards, strikes)
+        logstrikes = strike_to_log_strike(strikes)
 
         # Return as Pandas surface
-        return pd.DataFrame(log_strike_surface, index = self._tenors,
-                            columns = self._deltas)
+        return pd.DataFrame(logstrikes, index=self.tenors, columns=self.deltas)
 
-    def _forward_deltas(self):
+    def forward_deltas(self):
         """
         Converts surface of put deltas, N(-d1), to surface of forward deltas,
         N(-d2), required in the variance integral, Austing (10.28).
         """
         # Assign arguments for put_to_forward
-        put_deltas = np.array(self._put_deltas())
-        maturities = self._maturities
-        volatilities = np.array(self.surface)
+        put_deltas = np.array(self.put_deltas())
+        maturities = self.maturities[:,np.newaxis]
+        vols = self.vols
 
         # Construct forward delta, N(-d2), surface
-        forward_deltas = put_to_forward(put_deltas, maturities, volatilities)
+        forward_deltas = put_to_forward(put_deltas, maturities, vols)
 
         # Return as Pandas surface
-        return pd.DataFrame(forward_deltas, index = self._tenors,
-                            columns = self._deltas)
+        return pd.DataFrame(forward_deltas, index=self.tenors, columns=self.deltas)
 
-    def _variance_splines(self, degree = 3, smoothing = 0):
+    def variance_splines(self, degree = 3, smoothing = 0):
         """
         Constructs a spline for each tenor-slice of the squared volatility
         surface, which will be integrated w.r.t. forward delta, Austing (10.28).
         """
         # Assign arguments
-        forward_deltas = self._forward_deltas()
-        surface = self.surface
+        forward_deltas = self.forward_deltas()
+        vols = self.surface
 
-        variance_splines = len(self._tenors) * [None] # Empty list
+        variance_splines = len(self.tenors) * [None] # Empty list
         i = 0
-        for tenor in self._tenors:
+        for tenor in self.tenors:
             deltas = np.array(forward_deltas.loc[tenor])
-            variances = np.array(surface.loc[tenor])**2
+            variances = np.array(vols.loc[tenor])**2
             spline = UnivariateSpline(deltas, variances, bbox=[0,1], k=degree,
                                       s=smoothing)
             variance_splines[i] = spline
@@ -113,51 +110,51 @@ class Surface(object):
         surface against log-strike, k, to obtain ATM skew (Bayer 15 p. 4).
         """
         # Assign arguments
-        k = self._log_strike_surface()
+        k = self.logstrikes()
         surface = self.surface
 
-        skew = len(self._tenors) * [None] # Empty list
+        skew = len(self.tenors) * [None] # Empty list
         i = 0
-        for tenor in self._tenors:
+        for tenor in self.tenors:
             ks = np.array(k.loc[tenor])
             vols = np.array(surface.loc[tenor])
             spline = UnivariateSpline(ks, vols, k=degree,
                                       s=smoothing)
 
             deriv = spline.derivative()
-            skew[i] = np.absolute(deriv(0))
+            skew[i] = deriv(0)
             i += 1
 
         # Return spline for each tenor as Python list
         return np.array(skew)
 
-    def _integrated_variances(self, degree = 3, smoothing = 0):
+    def integrated_variances(self, degree = 3, smoothing = 0):
         """
         Integrates variance splines, Austing (10.28), to obtain integrated
         variances for each tenor.
         """
         # Assign splines to be integrated
-        variance_splines = self._variance_splines(degree, smoothing)
+        variance_splines = self.variance_splines(degree, smoothing)
 
-        integrated_variances = np.zeros(len(self._tenors))
+        integrated_variances = np.zeros(len(self.tenors))
         i = 0
-        for tenor in self._tenors:
+        for tenor in self.tenors:
             # Integrate each spline in (0,1)
             integrated_variances[i] = variance_splines[i].integral(0,1)
             i += 1
 
         # Return as Pandas DataFrame
-        return pd.DataFrame(integrated_variances, index = self._tenors)
+        return pd.DataFrame(integrated_variances, index = self.tenors)
 
-    def _variance_curve(self, degree = 3, smoothing = 0):
+    def variance_curve(self, degree = 3, smoothing = 0):
         '''
         Contructs an integrated variance curve from the discrete points of
         _integrated_variances which can be evaluated at any time. Particularly
         important for evaluating discretised or instantaneous forward variance.
         '''
         # Assign useful data
-        maturities = self._maturities[:,0]
-        integrated_variances = np.array(self._integrated_variances(degree, smoothing)) # Need option of piecewise constant forward variance (analytic)
+        maturities = self.maturities
+        integrated_variances = np.array(self.integrated_variances(degree, smoothing)) # Need option of piecewise constant forward variance (analytic)
 
         # Polynomial degree given by k; s=0 ensures through every point
         spline = UnivariateSpline(maturities, integrated_variances,
@@ -172,18 +169,18 @@ class Surface(object):
         process.
         """
 
-        M = self._maturities
-        T = M[-1,0] # Max maturity
+        M = self.maturities
+        T = M[-1] # Max maturity
         s = 1 + int(n * T) # Length of array
         xi = np.zeros((1, s))
         t = np.linspace(0, T, 1 + s) # Time grid
 
 
-        V = np.array(self._integrated_variances())
+        V = np.array(self.integrated_variances())
 
         Vf = np.zeros_like(V) # Forward variance
         Vf[0] = V[0]
-        for i in range(len(M[:,0]) - 1): # Strip forwards
+        for i in range(len(M) - 1): # Strip forwards
             Vf[i+1] = (M[i+1] * V[i+1] - M[i] * V[i]) / (M[i+1] - M[i])
 
         j = 0
