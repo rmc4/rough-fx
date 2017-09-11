@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from scipy.interpolate import UnivariateSpline
 from rbergomi.surface_utils import *
 
@@ -17,7 +16,7 @@ class Surface(object):
         self.deltas = np.array(df.columns).astype(str)
         self.tenors = np.array(df.index).astype(str)
         self.maturities = tenors_yearfracs(self.tenors)
-        self.vols = np.array(df)/scale
+        self.vols = np.array(self.surface)
 
     def put_deltas(self):
         """

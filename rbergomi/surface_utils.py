@@ -1,6 +1,5 @@
 import pandas as pd
 import numpy as np
-import xlwings as xw
 from scipy.stats import norm
 
 def csv_import(currency, date):
