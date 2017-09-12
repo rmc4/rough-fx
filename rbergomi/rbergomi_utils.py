@@ -60,7 +60,7 @@ def bs(F, K, V):
     # C = F * norm.cdf( d1) - K * norm.cdf( d2)
     return C
 
-def blsimpv(P, F, K, T):
+def bsinv(P, F, K, T):
     """
     Computes implied Black vol from given price, forward, strike and time.
     """

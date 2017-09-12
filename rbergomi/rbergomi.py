@@ -16,8 +16,8 @@ class rBergomi(object):
         Constructor for class.
         """
         # Basic assignments.
-        self.n = n # Granularity
-        self.N = N # Total paths
+        self.n = n # Steps per year
+        self.N = N # Paths
         self.T = T # Maturity
         self.dt = 1.0/n # Step size
         self.s = int(n*T) # Steps
@@ -29,6 +29,7 @@ class rBergomi(object):
         """
         self.α = α
         self.β = β
+        s = self.s
 
         # Store required covariance matrices
         cov1 = cov(α, self.n)
@@ -40,14 +41,14 @@ class rBergomi(object):
         random_numbers = np.array(pd.read_csv(fn))
 
         # Obviously generalise
-        dB11 = random_numbers[:,0*156:1*156]
-        dB12 = random_numbers[:,1*156:2*156]
-        dB21 = random_numbers[:,2*156:3*156]
-        dB22 = random_numbers[:,3*156:4*156]
+        dB11 = random_numbers[:,0*s:1*s]
+        dB12 = random_numbers[:,1*s:2*s]
+        dB21 = random_numbers[:,2*s:3*s]
+        dB22 = random_numbers[:,3*s:4*s]
 
         # Prepare for operations
-        dB1 = np.zeros((self.N,self.n,2,1))
-        dB2 = np.zeros((self.N,self.n,2,1))
+        dB1 = np.zeros((self.N,s,2,1))
+        dB2 = np.zeros((self.N,s,2,1))
 
         dB1[:,:,0,0] = dB11
         dB1[:,:,1,0] = dB12
@@ -58,14 +59,14 @@ class rBergomi(object):
         dW1 = np.squeeze(np.matmul(chol1,dB1))
         dW2 = np.squeeze(np.matmul(chol2,dB2))
 
-        dW = np.zeros((self.N,self.n,2,2))
+        dW = np.zeros((self.N,s,2,2))
         dW[:,:,:,0] = dW1
         dW[:,:,:,1] = dW2
 
         return dW
 
-    # Could promote this for two dimensions?
-    def Y(self, dW):
+    # Should promote this for two dimensions given α, β use
+    def Y(self, dW, α):
         """
         Constructs Volterra process from appropriately
         correlated 2d Brownian increments.
@@ -82,7 +83,7 @@ class rBergomi(object):
         # Construct arrays for convolution
         Γ = np.zeros(1 + self.s) # Gamma
         for k in np.arange(2, 1 + self.s, 1): # Assumes kappa = 1
-            Γ[k] = g(b(k, self.α)/self.n, self.α)
+            Γ[k] = g(b(k, α)/self.n, α)
 
         Ξ = dW[:,:,0] # Xi
 
@@ -98,7 +99,7 @@ class rBergomi(object):
         Y2 = ΓΞ[:,:1 + self.s]
 
         # Finally contruct and return full process
-        Y = np.sqrt(2 * self.α + 1) * (Y1 + Y2)
+        Y = np.sqrt(2 * α + 1) * (Y1 + Y2)
         return Y
 
     # def dW2(self):
@@ -136,17 +137,25 @@ class rBergomi(object):
     #     self.rho = rho
     #     return dB
 
-    def V(self, Y, ξ=1.0, η=1.0): # Important xi = 1.0 as default
+    # Yes should raise dimens
+    def V(self, Yα, Yβ, ξ=1.0, ζ=1.0, η=1.0):
         """
         rBergomi variance process.
         SHOULD ALSO WRITE INTEGRATED PROCESS METHOD FOR EFFICIENT LATER USE.
         """
 
+        self.ξ = ξ
+        self.ζ = ζ
+        self.η = η
+
         α = self.α
+        β = self.β
         t = self.t
 
-        V = ξ * np.exp(η*Y - 0.5*η**2 * t**(2*α+1))
+        Vα = np.exp(ζ*Yα - 0.5*ζ**2 * t**(2*α+1))
+        Vβ = np.exp(η*Yβ - 0.5*η**2 * t**(2*β+1))
 
+        V = ξ * Vα * Vβ
         return V
 
     def S(self, V, dB):
@@ -168,40 +177,59 @@ class rBergomi(object):
 
     # But still used in solver at moment!
     # Should pass Surface object here rather than maturities and strikes
-    def surface(self, S, maturities, log_strikes):
+
+    def surface(self, S, surf):
         """
         Provides the implied Black volatility surface for every option
         implicitely in a Surface object.
         """
-        surface = np.zeros_like(log_strikes)
+        vec_bsinv = np.vectorize(bsinv)
 
-        M = maturities
-        k = log_strikes
-        K = np.exp(k)
+        indices = (surf.maturities * self.n).astype(int)
+        ST = S[:,indices][:,:,np.newaxis]
+        K = np.array(surf.strikes())[np.newaxis,:,:]
+        w = 2 * (K > 1.0) - 1
+        payoffs = np.maximum(w*(ST - K),0)
+        prices = np.mean(payoffs, axis = 0)
+        T = surf.maturities[:,np.newaxis]
+        vols = vec_bsinv(prices, 1., np.squeeze(K), T)
 
-        loc = (M * self.n).astype(int) # Tidy this up..
+        return pd.DataFrame(vols, index=surf.tenors, columns=surf.deltas)
 
-        # Extract distribution of S at slices we care about
-        ST = np.zeros((len(S[:,0]), len(loc)))
-        j = 0
-        for i in loc:
-            ST[:,j] = np.squeeze(S[:,i]) # Not sure why squeeze is required..
-            j += 1
-
-        # Diabolical. Simplify through broadcasting
-        # Place these functions in utils
-        C = np.zeros_like(K)
-        for j in range(len(C[0,:])):
-            for i in range(len(C[:,0])):
-                w = 2 * (K[i,j] > 1.0) - 1 # CHANGE 4 OF 4
-                C[i,j] = np.mean(np.maximum(w*(ST[:,i] - K[i,j]), 0))
-
-        # Solver doesn't appear to accept broadcasting
-        for j in range(len(loc)):
-            for i in range(len(k[0,:])):
-                surface[j,i] = blsimpv(C[j,i], 1., K[j,i], M[j]) # Spot = 1
-
-        return surface
+    # def surface(self, S, maturities, log_strikes):
+    #     """
+    #     Provides the implied Black volatility surface for every option
+    #     implicitely in a Surface object.
+    #     """
+    #     surface = np.zeros_like(log_strikes)
+    #
+    #     M = maturities
+    #     k = log_strikes
+    #     K = np.exp(k)
+    #
+    #     loc = (M * self.n).astype(int) # Tidy this up..
+    #
+    #     # Extract distribution of S at slices we care about
+    #     ST = np.zeros((len(S[:,0]), len(loc)))
+    #     j = 0
+    #     for i in loc:
+    #         ST[:,j] = np.squeeze(S[:,i]) # Not sure why squeeze is required..
+    #         j += 1
+    #
+    #     # Diabolical. Simplify through broadcasting
+    #     # Place these functions in utils
+    #     C = np.zeros_like(K)
+    #     for j in range(len(C[0,:])):
+    #         for i in range(len(C[:,0])):
+    #             w = 2 * (K[i,j] > 1.0) - 1 # CHANGE 4 OF 4
+    #             C[i,j] = np.mean(np.maximum(w*(ST[:,i] - K[i,j]), 0))
+    #
+    #     # Solver doesn't appear to accept broadcasting
+    #     for j in range(len(loc)):
+    #         for i in range(len(k[0,:])):
+    #             surface[j,i] = blsimpv(C[j,i], 1., K[j,i], M[j]) # Spot = 1
+    #
+    #     return surface
 
     def surface2(self, C, maturities, log_strikes):
         """
