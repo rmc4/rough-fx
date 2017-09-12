@@ -1,5 +1,6 @@
 import numpy as np
-from rbergomi_utils import *
+import pandas as pd
+from rbergomi.rbergomi_utils import *
 
 class rBergomi(object):
     """
@@ -10,36 +11,60 @@ class rBergomi(object):
     V(t) := xi exp(eta Y - 0.5 eta^2 t^(2a + 1))
     S(t) := S0 int 0,t sqrt(V) dB(u) - 0.5 V du
     """
-    def __init__(self, n = 2, N = 1000, T = 0.25, a = -0.43, AS = True):
+    def __init__(self, n=156, N=1024, T=1.0):
         """
         Constructor for class.
         """
         # Basic assignments.
+        self.n = n # Granularity
+        self.N = N # Total paths
         self.T = T # Maturity
-        self.n = int(n * 156) # Scale up granularity
-        self.dt = 1.0/self.n # Step size
-        self.s = int(self.n * self.T) # Steps
-        self.t = np.linspace(0, self.T, 1 + self.s)[np.newaxis,:] # Time grid
-        self.a = a # Alpha
+        self.dt = 1.0/n # Step size
+        self.s = int(n*T) # Steps
+        self.t = np.linspace(0,T,1+self.s)[np.newaxis,:] # Time grid
 
-        self.N = int(N) # Total paths
-
-        self.AS = AS
-        if self.AS:
-            self.N = int(N/4)
-
-        # Construct mean and covariance for kappa = 1
-        self.e = np.array([0,0])
-        self.c = cov(self.a, self.n)
-
-    def dW1(self):
+    def dW(self, α=0.4, β=-0.4, seed=0):
         """
-        Method for producing random numbers for variance process with required
-        covariance structure.
+        .
         """
-        rng = np.random.multivariate_normal
-        return rng(self.e, self.c, (self.N, self.s))
+        self.α = α
+        self.β = β
 
+        # Store required covariance matrices
+        cov1 = cov(α, self.n)
+        cov2 = cov(β, self.n)
+        chol1 = np.linalg.cholesky(cov1)[np.newaxis,np.newaxis,:,:]
+        chol2 = np.linalg.cholesky(cov2)[np.newaxis,np.newaxis,:,:]
+
+        fn = 'sobol/'+str(seed)+'-'+'1024-624.csv'
+        random_numbers = np.array(pd.read_csv(fn))
+
+        # Obviously generalise
+        dB11 = random_numbers[:,0*156:1*156]
+        dB12 = random_numbers[:,1*156:2*156]
+        dB21 = random_numbers[:,2*156:3*156]
+        dB22 = random_numbers[:,3*156:4*156]
+
+        # Prepare for operations
+        dB1 = np.zeros((self.N,self.n,2,1))
+        dB2 = np.zeros((self.N,self.n,2,1))
+
+        dB1[:,:,0,0] = dB11
+        dB1[:,:,1,0] = dB12
+        dB2[:,:,0,0] = dB21
+        dB2[:,:,1,0] = dB22
+
+        # Finally, correlate in C-layer
+        dW1 = np.squeeze(np.matmul(chol1,dB1))
+        dW2 = np.squeeze(np.matmul(chol2,dB2))
+
+        dW = np.zeros((self.N,self.n,2,2))
+        dW[:,:,:,0] = dW1
+        dW[:,:,:,1] = dW2
+
+        return dW
+
+    # Could promote this for two dimensions?
     def Y(self, dW):
         """
         Constructs Volterra process from appropriately
@@ -55,100 +80,80 @@ class rBergomi(object):
             Y1[:,i] += dW[:,i-1,1] # Assumes kappa = 1
 
         # Construct arrays for convolution
-        G = np.zeros(1 + self.s) # Gamma
+        Γ = np.zeros(1 + self.s) # Gamma
         for k in np.arange(2, 1 + self.s, 1): # Assumes kappa = 1
-            G[k] = g(b(k, self.a)/self.n, self.a)
+            Γ[k] = g(b(k, self.α)/self.n, self.α)
 
-        X = dW[:,:,0] # Xi
+        Ξ = dW[:,:,0] # Xi
 
         # Initialise convolution result, GX
-        GX = np.zeros((self.N, len(X[0,:]) + len(G) - 1))
+        ΓΞ = np.zeros((self.N, len(Ξ[0,:]) + len(Γ) - 1))
 
         # Compute convolution, FFT not used for small n
         # Not able to compute all paths in C-layer
         for i in range(self.N):
-            GX[i,:] = np.convolve(G, X[i,:])
+            ΓΞ[i,:] = np.convolve(Γ, Ξ[i,:])
 
         # Extract appropriate part of convolution
-        Y2 = GX[:,:1 + self.s]
+        Y2 = ΓΞ[:,:1 + self.s]
 
         # Finally contruct and return full process
-        Y = np.sqrt(2 * self.a + 1) * (Y1 + Y2)
+        Y = np.sqrt(2 * self.α + 1) * (Y1 + Y2)
         return Y
 
-    def dW2(self):
-        """
-        Obtain orthogonal increments.
-        """
-        return np.random.randn(self.N, self.s) * np.sqrt(self.dt)
+    # def dW2(self):
+    #     """
+    #     Obtain orthogonal increments.
+    #     """
+    #     return np.random.randn(self.N, self.s) * np.sqrt(self.dt)
+    #
+    # def dB(self, dW1, dW2, rho = 0.0):
+    #     """
+    #     Method for obtaining price Brownian increments, dB, from variance, dW.
+    #     """
+    #     # Take variance increments from argument
+    #     dW10 = dW1[:,:,0]
+    #
+    #     # Act accorinding to AV token
+    #     if self.AS:
+    #         # Now correlate 4 cases appropriately
+    #         dB1 = rho * dW10 + np.sqrt(1 - rho**2) * dW2 # + + use + Y
+    #         dB2 = rho * dW10 - np.sqrt(1 - rho**2) * dW2 # + - use + Y
+    #         dB3 = - dB2                                  # - + use - Y
+    #         dB4 = - dB1                                  # - - use - Y
+    #
+    #         N = self.N
+    #         dB = np.zeros((4 * N, self.s))
+    #         dB[   :  N,:] = + dB1
+    #         dB[  N:2*N,:] = + dB2
+    #         dB[2*N:3*N,:] = - dB2
+    #         dB[3*N:   ,:] = - dB1
+    #     else:
+    #         # Just the single construction
+    #         dB = rho * dW10 + np.sqrt(1 - rho**2) * dW2
+    #
+    #     # Assign for later use
+    #     self.rho = rho
+    #     return dB
 
-    def dB(self, dW1, dW2, rho = 0.0):
-        """
-        Method for obtaining price Brownian increments, dB, from variance, dW.
-        """
-        # Take variance increments from argument
-        dW10 = dW1[:,:,0]
-
-        # Act accorinding to AV token
-        if self.AS:
-            # Now correlate 4 cases appropriately
-            dB1 = rho * dW10 + np.sqrt(1 - rho**2) * dW2 # + + use + Y
-            dB2 = rho * dW10 - np.sqrt(1 - rho**2) * dW2 # + - use + Y
-            dB3 = - dB2                                  # - + use - Y
-            dB4 = - dB1                                  # - - use - Y
-
-            N = self.N
-            dB = np.zeros((4 * N, self.s))
-            dB[   :  N,:] = + dB1
-            dB[  N:2*N,:] = + dB2
-            dB[2*N:3*N,:] = - dB2
-            dB[3*N:   ,:] = - dB1
-        else:
-            # Just the single construction
-            dB = rho * dW10 + np.sqrt(1 - rho**2) * dW2
-
-        # Assign for later use
-        self.rho = rho
-        return dB
-
-    def V(self, Y, xi = 1.0, eta = 1.0): # Important xi = 1.0 as default
+    def V(self, Y, ξ=1.0, η=1.0): # Important xi = 1.0 as default
         """
         rBergomi variance process.
         SHOULD ALSO WRITE INTEGRATED PROCESS METHOD FOR EFFICIENT LATER USE.
         """
 
-        a = self.a
+        α = self.α
         t = self.t
 
-        if self.AS:
-            # Perform antithetic computations
-            v1 = xi * np.exp(+ eta * Y - 0.5 * eta**2 * t**(2 * a + 1))
-            v2 = xi * np.exp(- eta * Y - 0.5 * eta**2 * t**(2 * a + 1))
+        V = ξ * np.exp(η*Y - 0.5*η**2 * t**(2*α+1))
 
-            # # Perform antithetic computations
-            # v1 = xi * np.exp(+ eta * Y - 0.5 * eta**2 * t)
-            # v2 = xi * np.exp(- eta * Y - 0.5 * eta**2 * t)
+        return V
 
-            N = self.N
-            v = np.zeros((4 * self.N, 1 + self.s))
-            v[   :  N,:] = v1
-            v[  N:2*N,:] = v1
-            v[2*N:3*N,:] = v2
-            v[3*N:   ,:] = v2
-
-        else:
-            # Compute single path
-            v = xi * np.exp(+ eta * Y - 0.5 * eta**2 * t**(2 * a + 1))
-
-        return v
-
-    def S(self, V, dB, S0 = 1):
+    def S(self, V, dB):
         """
         rBergomi price process.
         """
-        self.S0 = S0 # Spot price
         dt = self.dt
-        rho = self.rho # should remove all this
 
         # Construct non-anticipative Riemann increments
         increments = np.sqrt(V[:,:-1]) * dB - 0.5 * V[:,:-1] * dt
@@ -157,26 +162,8 @@ class rBergomi(object):
         integral = np.cumsum(increments, axis = 1)
 
         S = np.zeros_like(V)
-        S[:,0] = S0
-        S[:,1:] = S0 * np.exp(integral)
-        return S
-
-    def S2(self, v, dB, rho, S0 = 1):
-        """
-        rBergomi price process for PARALLEL BS simulation.
-        """
-        self.S0 = S0 # Spot price
-        dt = self.dt
-
-        # Construct non-anticipative Riemann increments
-        increments = rho * np.sqrt(v[:,:-1]) * dB - 0.5 * rho**2 * v[:,:-1] * dt
-
-        # Cumsum is actually a little slower than Python loop. Not terribly
-        integral = np.cumsum(increments, axis = 1)
-
-        S = np.zeros_like(v)
-        S[:,0] = S0
-        S[:,1:] = S0 * np.exp(integral)
+        S[:,0] = 1.
+        S[:,1:] = np.exp(integral)
         return S
 
     # But still used in solver at moment!
