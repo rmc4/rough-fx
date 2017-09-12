@@ -37,7 +37,8 @@ class rBergomi(object):
         chol1 = np.linalg.cholesky(cov1)[np.newaxis,np.newaxis,:,:]
         chol2 = np.linalg.cholesky(cov2)[np.newaxis,np.newaxis,:,:]
 
-        fn = 'sobol/'+str(seed)+'-'+'1024-624.csv'
+
+        fn = 'sobol/'+str(seed)+'-'+str(self.N)+'-'+str(4*s)+'.csv'
         random_numbers = np.array(pd.read_csv(fn))
 
         # Obviously generalise

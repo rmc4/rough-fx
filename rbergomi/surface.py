@@ -161,7 +161,7 @@ class Surface(object):
                                   s=smoothing)
         return spline
 
-    def xi(self, n = 2 * 156):
+    def ξ(self, n=156):
         """
         Construct piecewise flat forward variance curve, xi, analytically.
         Returns discretised grid which can be broadcast against a variance
@@ -171,7 +171,7 @@ class Surface(object):
         M = self.maturities
         T = M[-1] # Max maturity
         s = 1 + int(n * T) # Length of array
-        xi = np.zeros((1, s))
+        ξ = np.zeros((1, s))
         t = np.linspace(0, T, 1 + s) # Time grid
 
 
@@ -186,9 +186,9 @@ class Surface(object):
         for i in range(s):
             if t[i] >= M[j]:
                 j += 1
-            xi[0,i] = Vf[j]
+            ξ[0,i] = Vf[j]
 
-        return xi
+        return ξ
 
     def prices(self, option = 'Call'):
         """
