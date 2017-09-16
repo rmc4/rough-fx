@@ -78,3 +78,11 @@ def price(F, K, T, s):
     d2 = d1 - s * np.sqrt(T)
     P = F * norm.cdf(d1) - K * norm.cdf(d2)
     return P
+
+def SVI(k,t,θ,ρ,φ):
+    """
+    SVI vol evaluation using formulation in VIX futures (JMM17) p.15
+    σ^2_BS(k)t = w = θ/2 * (1 + ρ*φ*k + np.sqrt((φ*k + ρ)**2 + 1 - ρ**2))
+    """
+    w = θ/2 * (1 + ρ*φ*k + np.sqrt((φ*k + ρ)**2 + 1 - ρ**2))
+    return np.sqrt(w/t)

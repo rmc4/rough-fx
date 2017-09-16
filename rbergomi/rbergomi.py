@@ -101,6 +101,7 @@ class rBergomi(object):
 
         # Finally contruct and return full process
         Y = np.sqrt(2 * α + 1) * (Y1 + Y2)
+        # Y = (Y1 + Y2)
         return Y
 
     # def dW2(self):
@@ -189,11 +190,18 @@ class rBergomi(object):
         indices = (surf.maturities * self.n).astype(int)
         ST = S[:,indices][:,:,np.newaxis]
         K = np.array(surf.strikes())[np.newaxis,:,:]
-        w = 2 * (K > 1.0) - 1
-        payoffs = np.maximum(w*(ST - K),0)
-        prices = np.mean(payoffs, axis = 0)
+        Δ = np.array(surf.put_deltas())
         T = surf.maturities[:,np.newaxis]
-        vols = vec_bsinv(prices, 1., np.squeeze(K), T)
+
+        call_payoffs = np.maximum(ST - K,0) - (1-Δ)*(ST - 1)
+        call_prices = np.mean(call_payoffs, axis=0)
+        call_vols = vec_bsinv(call_prices, 1., np.squeeze(K), T, ϕ=1)
+
+        put_payoffs = np.maximum(K - ST,0) + Δ*(ST - 1)
+        put_prices = np.mean(put_payoffs, axis=0)
+        put_vols = vec_bsinv(put_prices, 1., np.squeeze(K), T, ϕ=-1)
+
+        vols = (call_vols + put_vols) / 2
 
         return pd.DataFrame(vols, index=surf.tenors, columns=surf.deltas)
 

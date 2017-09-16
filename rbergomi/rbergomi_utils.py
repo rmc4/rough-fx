@@ -44,34 +44,29 @@ def cov(a, n):
     cov[1,0] = cov[0,1]
     return cov
 
-def bs(F, K, V):
+def bs(F, K, V, ϕ=1):
     """
     Returns the Black call price for given forward, strike and variance.
     """
-    s = np.sqrt(V)
-    d1 = np.log(F/K) / s + 0.5 * s
-    d2 = d1 - s
+    σ = np.sqrt(V)
+    d1 = np.log(F/K) / σ + 0.5 * σ
+    d2 = d1 - σ
 
-    # ADDING PUT FUNCTIONALITY 1 OF 3
-    w = 2 * (K > 1.0) - 1
-    # w = 1
-    C = w * F * norm.cdf(w * d1) - w * K * norm.cdf(w * d2)
+    C = ϕ * F * norm.cdf(ϕ * d1) - ϕ * K * norm.cdf(ϕ * d2)
 
     # C = F * norm.cdf( d1) - K * norm.cdf( d2)
     return C
 
-def bsinv(P, F, K, T):
+def bsinv(P, F, K, T, ϕ=1):
     """
     Computes implied Black vol from given price, forward, strike and time.
     """
     # Apply at least intrinsic value
-    # PUT OPTION ADDITION 2 OF 3
-    w = 2 * (K > 1.0) - 1
     # w = 1
-    P = np.maximum(P, np.maximum(w * (F - K), 0))
+    P = np.maximum(P, np.maximum(ϕ * (F - K), 0))
 
-    def error(s):
-        return bs(F, K, s**2 * T) - P
+    def error(σ):
+        return bs(F, K, σ**2 * T, ϕ=ϕ) - P
     # if P == np.maximum(F - K, 0):
     #     result = 0
     # else:

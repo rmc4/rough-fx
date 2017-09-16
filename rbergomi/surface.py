@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from scipy.interpolate import UnivariateSpline
+from scipy.optimize import minimize
 from rbergomi.surface_utils import *
 
 class Surface(object):
@@ -174,8 +175,11 @@ class Surface(object):
         ξ = np.zeros((1, s))
         t = np.linspace(0, T, 1 + s) # Time grid
 
+        # This integrates with cubic spline, loosing accuracy
+        # V = np.array(self.integrated_variances())
 
-        V = np.array(self.integrated_variances())
+        # Testing improvment with SVI
+        V = (np.array(self.SVI().loc[:,'V'])/self.maturities)[:,np.newaxis]
 
         Vf = np.zeros_like(V) # Forward variance
         Vf[0] = V[0]
@@ -207,3 +211,49 @@ class Surface(object):
         else:
             prices = put_price(F, K, T, vol)
         return prices
+
+    def SVI(self):
+        """
+        Using notation from VIX futures (JMM17) p.15
+        σ^2_BS(k)t = w = θ/2 * (1 + ρ*φ*k + np.sqrt((φ*k + ρ)**2 + 1 - ρ**2))
+        Relies on their being an ATM column
+        """
+        # Prepare basic things
+        σ = self.vols
+        ATM = np.array(self.surface.loc[:,'ATM'])
+        t = self.maturities
+        θ = ATM**2*t
+        k = np.array(self.logstrikes())
+
+        headers = ['Θ','ρ','φ','χ','a','b','c','RMSE','arb','V']
+        array = np.zeros((len(t),len(headers)))
+
+        # Prepare solver params
+        ρ0,φ0 = -0.5, 5
+        ρ1,φ1 = (-1,1),(-100,100)
+        x0, bnds = (ρ0,φ0),(ρ1,φ1)
+        ops = {'maxiter':100}
+
+        for i in range(len(t)):
+            # Define objective function for time slice and minimise
+            def rmse(x):
+                ρ,φ = x[0],x[1]
+                true = σ[i,:]
+                aprx = SVI(k[i,:],t[i],θ[i],ρ,φ)
+                rmse = np.sqrt(np.mean((aprx-true)**2))
+                return rmse
+            res = minimize(rmse,x0,method='L-BFGS-B',bounds=bnds,options=ops)
+
+            # Build slice for dataframe output
+            ρ = res.x[0]
+            φ = res.x[1]
+            χ = (1-ρ**2)*θ[i]*φ/4
+            a = 1+θ[i]*φ/2*(ρ-χ/2)
+            b = θ[i]*φ*(χ-ρ)
+            c = θ[i]*φ*χ
+            RMSE = res.fun
+            arb = ( θ[i]*φ**2 * (1 + np.abs(ρ)) > 4 )
+            V = (b**2+2*a*(c+θ[i]))/2/a**2
+            array[i,:] = [ θ[i],ρ,φ,χ,a,b,c,RMSE,arb,V ]
+
+        return pd.DataFrame(array, index=self.tenors, columns=headers)
