@@ -13,6 +13,8 @@ class Surface(object):
         Constructor for surface instance.
         """
         df = csv_import(currency, date)
+        self.ccy = currency
+        self.date = date
         self.surface = df/scale
         self.deltas = np.array(df.columns).astype(str)
         self.tenors = np.array(df.index).astype(str)
@@ -216,7 +218,7 @@ class Surface(object):
         """
         Using notation from VIX futures (JMM17) p.15
         σ^2_BS(k)t = w = θ/2 * (1 + ρ*φ*k + np.sqrt((φ*k + ρ)**2 + 1 - ρ**2))
-        Relies on their being an ATM column
+        Relies on there being an ATM column
         """
         # Prepare basic things
         σ = self.vols
@@ -225,11 +227,11 @@ class Surface(object):
         θ = ATM**2*t
         k = np.array(self.logstrikes())
 
-        headers = ['Θ','ρ','φ','χ','a','b','c','RMSE','arb','V']
+        headers = ['t','Θ','ρ','φ','RMSE','arb','V','d0','d1','d2']
         array = np.zeros((len(t),len(headers)))
 
         # Prepare solver params
-        ρ0,φ0 = -0.5, 5
+        ρ0,φ0 = -0.5, 50
         ρ1,φ1 = (-1,1),(-100,100)
         x0, bnds = (ρ0,φ0),(ρ1,φ1)
         ops = {'maxiter':100}
@@ -252,8 +254,11 @@ class Surface(object):
             b = θ[i]*φ*(χ-ρ)
             c = θ[i]*φ*χ
             RMSE = res.fun
-            arb = ( θ[i]*φ**2 * (1 + np.abs(ρ)) > 4 )
+            arb =  ( θ[i]*φ**2 * (1 + np.abs(ρ)) ) > 4
             V = (b**2+2*a*(c+θ[i]))/2/a**2
-            array[i,:] = [ θ[i],ρ,φ,χ,a,b,c,RMSE,arb,V ]
+            d0 = np.sqrt(θ[i]/t[i])
+            d1 = ρ*φ*np.sqrt(θ[i]/t[i])/2
+            d2 = φ**2*np.sqrt(θ[i]/t[i])*(-2*ρ**2 + 1)/4
+            array[i,:] = [ t[i],θ[i],ρ,φ,RMSE,arb,V,d0,d1,d2 ]
 
         return pd.DataFrame(array, index=self.tenors, columns=headers)
