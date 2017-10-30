@@ -11,7 +11,7 @@ class rBergomi(object):
     V(t) := xi exp(eta Y - 0.5 eta^2 t^(2a + 1))
     S(t) := S0 int 0,t sqrt(V) dB(u) - 0.5 V du
     """
-    def __init__(self, n=156, N=1024, T=1.0):
+    def __init__(self, n=256, N=1024, T=1.0):
         """
         Constructor for class.
         """
@@ -38,8 +38,12 @@ class rBergomi(object):
         chol2 = np.linalg.cholesky(cov2)[np.newaxis,np.newaxis,:,:]
 
 
-        fn = 'sobol/'+str(seed)+'-'+str(self.N)+'-'+str(4*s)+'.csv'
-        random_numbers = np.array(pd.read_csv(fn))
+        # fn = 'sobol/'+str(seed)+'-'+str(self.N)+'-'+str(4*s)+'.csv'
+        # random_numbers = np.array(pd.read_csv(fn))
+
+        ## SHOULD BE OUTSIDE CALIBRATION ROUTINE
+        np.random.seed(seed)
+        random_numbers = np.random.normal(size=(self.N,4*s))
 
         # Obviously generalise
         dB11 = random_numbers[:,0*s:1*s]
@@ -78,8 +82,11 @@ class rBergomi(object):
         # Construct Y1 through exact integral
         # for i in range(1 + self.s):
         # Use np.cumsum here? - must time this
-        for i in np.arange(1, 1 + self.s, 1): # See (3.6)
-            Y1[:,i] += dW[:,i-1,1] # Assumes kappa = 1
+        # for i in np.arange(1, 1 + self.s, 1): # See (3.6)
+        #     Y1[:,i] += dW[:,i-1,1] # Assumes kappa = 1
+
+        # Construct Y1 through exact integral
+        Y1[:,1:1+self.s] = dW[:,:self.s,1] # Assumes kappa = 1
 
         # Construct arrays for convolution
         Γ = np.zeros(1 + self.s) # Gamma
@@ -101,11 +108,10 @@ class rBergomi(object):
 
         # Finally contruct and return full process
         Y = np.sqrt(2 * α + 1) * (Y1 + Y2)
-        # Y = (Y1 + Y2)
         return Y
 
     # Yes should raise dimens
-    def V(self, Yα, Yβ, ξ=1.0, ζ=1.0, η=1.0):
+    def V(self, Yα, Yβ, ξ=1.0, ζ=-0.5, η=1.5):
         """
         rBergomi variance process.
         SHOULD ALSO WRITE INTEGRATED PROCESS METHOD FOR EFFICIENT LATER USE.
@@ -142,9 +148,6 @@ class rBergomi(object):
         S[:,1:] = np.exp(integral)
         return S
 
-    # But still used in solver at moment!
-    # Should pass Surface object here rather than maturities and strikes
-
     def surface(self, S, surf):
         """
         Provides the implied Black volatility surface for every option
@@ -155,7 +158,7 @@ class rBergomi(object):
         indices = (surf.maturities * self.n).astype(int)
         ST = S[:,indices][:,:,np.newaxis]
         K = np.array(surf.strikes())[np.newaxis,:,:]
-        Δ = np.array(surf.put_deltas())
+        Δ = np.array(surf.forward_deltas())
         T = surf.maturities[:,np.newaxis]
 
         call_payoffs = np.maximum(ST - K,0) - (1-Δ)*(ST - 1)
