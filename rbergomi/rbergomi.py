@@ -37,7 +37,6 @@ class rBergomi(object):
         chol1 = np.linalg.cholesky(cov1)[np.newaxis,np.newaxis,:,:]
         chol2 = np.linalg.cholesky(cov2)[np.newaxis,np.newaxis,:,:]
 
-
         # fn = 'sobol/'+str(seed)+'-'+str(self.N)+'-'+str(4*s)+'.csv'
         # random_numbers = np.array(pd.read_csv(fn))
 
@@ -161,11 +160,41 @@ class rBergomi(object):
         Δ = np.array(surf.forward_deltas())
         T = surf.maturities[:,np.newaxis]
 
-        call_payoffs = np.maximum(ST - K,0) - (1-Δ)*(ST - 1)
+        call_payoffs = np.maximum(ST - K,0) #- (1-Δ)*(ST - 1)
         call_prices = np.mean(call_payoffs, axis=0)
         call_vols = vec_bsinv(call_prices, 1., np.squeeze(K), T, ϕ=1)
 
-        put_payoffs = np.maximum(K - ST,0) + Δ*(ST - 1)
+        put_payoffs = np.maximum(K - ST,0) #+ Δ*(ST - 1)
+        put_prices = np.mean(put_payoffs, axis=0)
+        put_vols = vec_bsinv(put_prices, 1., np.squeeze(K), T, ϕ=-1)
+
+        # don't think helpful when have control
+        vols = (call_vols + put_vols) / 2
+
+        return pd.DataFrame(vols, index=surf.tenors, columns=surf.deltas)
+
+    def cross_surface(self, X1, X2, surf):
+        """
+        Provides surface for X3 := X1 / X2.
+        """
+        vec_bsinv = np.vectorize(bsinv)
+
+        indices = (surf.maturities * self.n).astype(int)
+        X1T = X1[:,indices][:,:,np.newaxis]
+        X2T = X2[:,indices][:,:,np.newaxis]
+        X3T = X1T / X2T
+        K = np.array(surf.strikes())[np.newaxis,:,:]
+
+        # Try controlling with both X1 and X2
+        # Δ = np.array(surf.forward_deltas())
+        T = surf.maturities[:,np.newaxis]
+
+        # Make sure makes sense to have X2T
+        call_payoffs = X2T * np.maximum(X3T - K,0) #- (1-Δ)*(ST - 1)
+        call_prices = np.mean(call_payoffs, axis=0)
+        call_vols = vec_bsinv(call_prices, 1., np.squeeze(K), T, ϕ=1)
+
+        put_payoffs = X2T * np.maximum(K - X3T,0) #+ Δ*(ST - 1)
         put_prices = np.mean(put_payoffs, axis=0)
         put_vols = vec_bsinv(put_prices, 1., np.squeeze(K), T, ϕ=-1)
 

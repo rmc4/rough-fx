@@ -80,3 +80,65 @@ def rmse(actual, implied):
     #rmse = np.sqrt(np.mean(((implied - actual) / actual)**2))
     rmse = np.sqrt(np.mean((implied - actual)**2))
     return rmse
+
+def dB2(N,s,ρ=0.5,seed=0):
+    """
+    Get random numbers for two correlated rBergomi processes, each having
+    N paths and s steps.
+    """
+    np.random.seed(0)
+    # Following assumes orthogonal variance components equivalent
+    rn = np.random.normal(size=(N,6*s))
+    # In what follows the 3 indices correspond to process, factor, hybrid
+    # Skew
+    dB111 = rn[:,0*s:1*s]
+    dB112 = rn[:,1*s:2*s]
+    # Curvature
+    dB121 = rn[:,4*s:5*s]
+    dB122 = rn[:,5*s:6*s]
+    # Correlated skew
+    dB211 = ρ*rn[:,0*s:1*s]+np.sqrt(1-ρ**2)*rn[:,2*s:3*s]
+    dB212 = ρ*rn[:,1*s:2*s]+np.sqrt(1-ρ**2)*rn[:,3*s:4*s]
+    # Same curvature
+    dB221 = rn[:,4*s:5*s]
+    dB222 = rn[:,5*s:6*s]
+    # Now prepare 4 hybrid 2D Bms
+    dB11 = np.zeros((N,s,2,1)) # α for first
+    dB11[:,:,0,0] = dB111
+    dB11[:,:,1,0] = dB112
+    dB12 = np.zeros((N,s,2,1)) # β for first
+    dB12[:,:,0,0] = dB121
+    dB12[:,:,1,0] = dB122
+    dB21 = np.zeros((N,s,2,1)) # α for second
+    dB21[:,:,0,0] = dB211
+    dB21[:,:,1,0] = dB212
+    dB22 = np.zeros((N,s,2,1)) # β for second
+    dB22[:,:,0,0] = dB221
+    dB22[:,:,1,0] = dB222
+    # Return nicely
+    return np.array([[dB11,dB12],[dB21,dB22]])
+
+def dW2(dB2,α1,β1,α2,β2,n):
+    """
+    Correlate for hybrid scheme.
+    """
+    dB11 = dB2[0,0]
+    dB12 = dB2[0,1]
+    dB21 = dB2[1,0]
+    dB22 = dB2[1,1]
+    # Prepare hybrid choleskys
+    cov11 = cov(α1,n)
+    cov12 = cov(β1,n)
+    cho11 = np.linalg.cholesky(cov11)[np.newaxis,np.newaxis,:,:]
+    cho12 = np.linalg.cholesky(cov12)[np.newaxis,np.newaxis,:,:]
+    cov21 = cov(α2,n)
+    cov22 = cov(β2,n)
+    cho21 = np.linalg.cholesky(cov21)[np.newaxis,np.newaxis,:,:]
+    cho22 = np.linalg.cholesky(cov22)[np.newaxis,np.newaxis,:,:]
+    # And correlate
+    dW11 = np.squeeze(np.matmul(cho11,dB11))
+    dW12 = np.squeeze(np.matmul(cho12,dB12))
+    dW21 = np.squeeze(np.matmul(cho21,dB21))
+    dW22 = np.squeeze(np.matmul(cho22,dB22))
+    # Return nicely
+    return np.array([[dW11,dW12],[dW21,dW22]])
